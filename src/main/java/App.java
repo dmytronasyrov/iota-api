@@ -1,9 +1,14 @@
+import com.google.gson.Gson;
 import jota.IotaAPI;
 import jota.dto.response.*;
 import jota.error.ArgumentException;
+import jota.model.Bundle;
+import jota.model.Transaction;
 import jota.model.Transfer;
+import jota.utils.Converter;
 import jota.utils.InputValidator;
 import jota.utils.SeedRandomGenerator;
+import jota.utils.TrytesConverter;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.BufferedReader;
@@ -21,13 +26,13 @@ import java.util.Properties;
 
 public class App {
 
-  private static final String TEST_MESSAGE = "MYUNIQUEMESSAGETOTANGLE";
-  private static final String TEST_TAG = "PHAROSPRODUCTION";
   private static final int MIN_WEIGHT_MAGNITUDE = 14;
   private static final int DEPTH = 9;
 
   public static void main(String[] args) {
     try {
+      Item item = new Item("BMW", "12000 USD");
+
       Properties config = getNodeConfig();
       IotaAPI iota = iota(config);
 
@@ -47,14 +52,25 @@ public class App {
       System.out.println("IOTA ADDRESSES: " + addresses.toString());
       System.out.println("---------------------------------------------------------\n");
 
+      String tag = TrytesConverter.toTrytes("Pharos");
+      System.out.println("IOTA TAG TRYTES: " + tag);
+
       long startTime = System.currentTimeMillis();
-      SendTransferResponse transferResponse = sendTransfer(iota, seed, address, TEST_MESSAGE, TEST_TAG);
+      SendTransferResponse transferResponse = sendTransfer(iota, seed, address, item, tag);
       System.out.println("IOTA TRANSACTIONS: " + transferResponse.getTransactions().toString());
       System.out.println("IOTA SUCCESS: " + Arrays.toString(transferResponse.getSuccessfully()));
       long endTime = System.currentTimeMillis();
       NumberFormat formatter = new DecimalFormat("#0.00000");
       System.out.print("Execution time is " + formatter.format((endTime - startTime) / 1000d) + " seconds\n");
       System.out.println("---------------------------------------------------------\n");
+
+      String[] hashes = transferResponse.getTransactions().stream().map(Transaction::getHash).toArray(String[]::new);
+      System.out.println("IOTA HASHES: " + Arrays.toString(hashes));
+      findByHashes(iota, hashes);
+
+      String[] tagsToFind = { "DCWCPCFDCDGD" };
+      System.out.println("IOTA TAGS: " + Arrays.toString(tagsToFind));
+      findByTags(iota, tagsToFind);
 
       System.exit(0);
     } catch (Exception e) {
@@ -81,22 +97,64 @@ public class App {
     return accounts;
   }
 
-  private static GetBalancesAndFormatResponse inputs(IotaAPI iota, String seed) throws ArgumentException {
-    GetBalancesAndFormatResponse inputs = iota.getInputs(seed, 2, 0, 0, 1);
-    System.out.println("IOTA INPUTS: " + inputs.toString());
-    System.out.println("---------------------------------------------------------\n");
+//  private static GetBalancesAndFormatResponse inputs(IotaAPI iota, String seed) throws ArgumentException {
+//    GetBalancesAndFormatResponse inputs = iota.getInputs(seed, 2, 0, 0, 1);
+//    System.out.println("IOTA INPUTS: " + inputs.toString());
+//    System.out.println("---------------------------------------------------------\n");
+//
+//    return inputs;
+//  }
 
-    return inputs;
-  }
-
-  private static SendTransferResponse sendTransfer(IotaAPI iota, String seed, String address, String msg, String tag) throws ArgumentException {
-    // for each 2187 trytes in a message one transfer is necessary
-    Transfer transfer = new Transfer(address, 0, StringUtils.rightPad(msg, 2188, '9'), tag);
+  private static SendTransferResponse sendTransfer(IotaAPI iota, String seed, String address, Item item, String tag) throws ArgumentException {
+    final String trytes = TrytesConverter.toTrytes(item.toJson());
+    System.out.println("IOTA MSG TRYTES: " + trytes);
+    Transfer transfer = new Transfer(address, 0, trytes, tag);
     List<Transfer> transfers = new ArrayList<>();
     transfers.add(transfer);
 
     return iota.sendTransfer(seed, 2, DEPTH, MIN_WEIGHT_MAGNITUDE, transfers, null, null, false);
   }
+
+  private static void findByTags(IotaAPI iota, String[] tags) throws ArgumentException {
+//    FindTransactionResponse findResponse = iota.findTransactions(null, tags, null, null);
+//    String[] hashes = findResponse.getHashes();
+//    System.out.println("IOTA TAGS HASHES: " + Arrays.toString(hashes));
+
+    List<Transaction> transactions = iota.findTransactionObjectsByTag(tags);
+    System.out.println("IOTA TRANSACTIONS BY TAGS: " + transactions.toString());
+    getItemsFromTxs(transactions);
+    System.out.println("---------------------------------------------------------\n");
+  }
+
+  private static void findByHashes(IotaAPI iota, String[] hashes) throws ArgumentException {
+    List<Transaction> transactions = iota.findTransactionsObjectsByHashes(hashes);
+    System.out.println("IOTA TRANSACTIONS BY HASHES: " + transactions.toString());
+    getItemsFromTxs(transactions);
+    System.out.println("---------------------------------------------------------\n");
+  }
+
+  private static void getItemsFromTxs(List<Transaction> transactions) {
+    for (Transaction tx : transactions) {
+      String dataEncrypt = StringUtils.stripEnd(tx.getSignatureFragments(), "9");
+      String json = TrytesConverter.toString(dataEncrypt);
+      Item item = new Gson().fromJson(json, Item.class);
+      System.out.println("IOTA ITEM: " + item.toString());
+    }
+  }
+
+//  private static void getTransfers(IotaAPI iota, String seed) throws ArgumentException {
+//    GetTransferResponse transfers = iota.getTransfers(seed, 2, 0, 0, false);
+//    System.out.println("IOTA TRANSFERS: " + transfers.toString());
+//
+//    for (Bundle bundle : transfers.getTransfers()) {
+//      for (Transaction tx : bundle.getTransactions()) {
+//        System.out.println(tx.getBranchTransaction());
+////        System.out.println("TRANSACTION MESSAGE: " + TrytesConverter.toString(tx.getBundle()));
+//      }
+//    }
+//
+//    System.out.println("---------------------------------------------------------\n");
+//  }
 
   private static IotaAPI iota(Properties conf) {
     return new IotaAPI.Builder()
